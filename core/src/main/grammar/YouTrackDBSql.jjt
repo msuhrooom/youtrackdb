@@ -105,6 +105,8 @@ TOKEN:
 	|
 	< DELETE: ( "d" | "D" ) ( "e" | "E" ) ( "l" | "L" ) ( "e" | "E" ) ( "t" | "T" ) ( "e" | "E" ) >
 	|
+	< CASCADE: ("c"|"C") ("a"|"A") ("s"|"S") ("c"|"C") ("a"|"A") ("d"|"D") ("e"|"E") >
+	|
 	< VERTEX: ( "v" | "V" ) ( "e" | "E" ) ( "r" | "R" ) ( "t" | "T" ) ( "e" | "E" ) ( "x" | "X" ) >
 	|
 	< EDGE: ( "e" | "E" ) ( "d" | "D" ) ( "g" | "G" ) ( "e" | "E" ) >
@@ -1292,6 +1294,7 @@ SQLDeleteStatement DeleteStatement():
 	[ <RETURN> <BEFORE> { jjtThis.returnBefore = true; } ]
 	[ <WHERE> jjtThis.whereClause = WhereClause() ]
 	[ jjtThis.limit = Limit() ]
+	[ <CASCADE> { jjtThis.cascade = true; }]
 	[ <UNSAFE> { jjtThis.unsafe = true; }]
 ) {return jjtThis;}
 }
@@ -4677,6 +4680,8 @@ SQLSecurityResourceSegment SecurityResourceSegment():
             token = <CREATE> { jjtThis.setIdentifier(new SQLIdentifier(token.image)); }
             |
             token = <DELETE> { jjtThis.setIdentifier(new SQLIdentifier(token.image)); }
+            |
+            token = <CASCADE> { jjtThis.setIdentifier(new SQLIdentifier(token.image)); }
             |
             token = <INSERT> { jjtThis.setIdentifier(new SQLIdentifier(token.image)); }
             |

@@ -4,13 +4,9 @@ import com.jetbrains.youtrackdb.api.exception.DatabaseException;
 import com.jetbrains.youtrackdb.api.query.ExecutionStep;
 import com.jetbrains.youtrackdb.api.query.Result;
 import com.jetbrains.youtrackdb.api.record.Entity;
-import com.jetbrains.youtrackdb.api.record.Vertex;
-import com.jetbrains.youtrackdb.api.record.Edge;
 import com.jetbrains.youtrackdb.internal.common.concur.TimeoutException;
 import com.jetbrains.youtrackdb.internal.core.command.CommandContext;
 import com.jetbrains.youtrackdb.internal.core.sql.executor.resultset.ExecutionStream;
-
-import java.util.*;
 
 /**
  * Executes cascade deletion based on configured cascade policies.
@@ -38,7 +34,7 @@ public class CascadeDeleteStep extends AbstractExecutionStep {
     public ExecutionStream internalStart(CommandContext ctx) throws TimeoutException {
         assert prev != null;
         var upstream = prev.start(ctx);
-        return upstream.map(result -> processCascadeDelete(result, ctx));
+      return upstream.map((result, context) -> processCascadeDelete(result, context));
     }
 
     private Result processCascadeDelete(Result result, CommandContext ctx) {

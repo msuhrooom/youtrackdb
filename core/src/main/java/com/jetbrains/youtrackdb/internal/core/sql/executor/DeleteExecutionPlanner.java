@@ -12,30 +12,41 @@ import com.jetbrains.youtrackdb.internal.core.sql.parser.SQLWhereClause;
  */
 public class DeleteExecutionPlanner {
 
+  private final SQLDeleteStatement stm;
   private final SQLFromClause fromClause;
   private final SQLWhereClause whereClause;
   private final boolean returnBefore;
   private final SQLLimit limit;
+  private final boolean cascade;
   private final boolean unsafe;
 
   public DeleteExecutionPlanner(SQLDeleteStatement stm) {
+    this.stm = stm;
     this.fromClause = stm.getFromClause() == null ? null : stm.getFromClause().copy();
     this.whereClause = stm.getWhereClause() == null ? null : stm.getWhereClause().copy();
     this.returnBefore = stm.isReturnBefore();
     this.limit = stm.getLimit() == null ? null : stm.getLimit();
+    this.cascade = stm.isCascade();
     this.unsafe = stm.isUnsafe();
   }
 
   public DeleteExecutionPlan createExecutionPlan(CommandContext ctx, boolean enableProfiling) {
     var result = new DeleteExecutionPlan(ctx);
 
-    handleTarget(result, ctx, this.fromClause, this.whereClause, enableProfiling);
-    handleUnsafe(result, ctx, this.unsafe, enableProfiling);
-    handleLimit(result, ctx, this.limit, enableProfiling);
-    handleDelete(result, ctx, enableProfiling);
-    handleReturn(result, ctx, this.returnBefore, enableProfiling);
+    if (cascade) {
+      var cascadePolicy = CascadeDeletePolicy.getRecommendedForIssueTracking();
+      return new CascadeDeleteExecutionPlanner(stm, cascadePolicy)
+          .createExecutionPlan(ctx, enableProfiling);
+    } else {
+      handleTarget(result, ctx, this.fromClause, this.whereClause, enableProfiling);
+      handleUnsafe(result, ctx, this.unsafe, enableProfiling);
+      handleLimit(result, ctx, this.limit, enableProfiling);
+      handleDelete(result, ctx, enableProfiling);
+      handleReturn(result, ctx, this.returnBefore, enableProfiling);
 
-    return result;
+      return result;
+    }
+
   }
 
   private static void handleDelete(

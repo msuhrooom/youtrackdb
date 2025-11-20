@@ -25,7 +25,7 @@ public class CascadeDeleteExecutionPlanner extends DeleteExecutionPlanner {
         // Build execution plan following YouTrackDB pattern:
         // 1. First get the entities to delete (from base DeleteExecutionPlanner)
         var baseStep = super.createExecutionPlan(ctx, enableProfiling).getSteps().get(0);
-        executionPlan.chain(baseStep);
+      executionPlan.chain((ExecutionStepInternal) baseStep);
         
         // 2. Add cascade delete step if cascade is enabled
         if (cascadePolicy != CascadeDeletePolicy.NONE) {

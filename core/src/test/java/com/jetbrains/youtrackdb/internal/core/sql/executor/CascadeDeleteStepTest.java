@@ -1,10 +1,12 @@
 package com.jetbrains.youtrackdb.internal.core.sql.executor;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
+import com.jetbrains.youtrackdb.api.record.Entity;
 import com.jetbrains.youtrackdb.internal.DbTestBase;
-import com.jetbrains.youtrackdb.api.record.Vertex;
-import com.jetbrains.youtrackdb.api.record.Edge;
+import com.jetbrains.youtrackdb.internal.core.command.BasicCommandContext;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -62,7 +64,7 @@ public class CascadeDeleteStepTest extends DbTestBase {
         
         // Verify issue still exists with same data
         session.begin();
-        var remainingIssue = session.load(issueId);
+      Entity remainingIssue = session.load(issueId);
         assertNotNull("Issue should still exist", remainingIssue);
         assertEquals("Issue title should be preserved", "Test Issue", 
                     remainingIssue.getProperty("title"));
@@ -90,7 +92,7 @@ public class CascadeDeleteStepTest extends DbTestBase {
         
         // Create cascade delete step with EAGER policy
         var cascadeStep = new CascadeDeleteStep(
-            session.getCommandContext(),
+            new BasicCommandContext(session),
             CascadeDeletePolicy.CASCADE_EAGER,
             false
         );
@@ -120,7 +122,7 @@ public class CascadeDeleteStepTest extends DbTestBase {
         
         // Create cascade delete step with LAZY policy
         var cascadeStep = new CascadeDeleteStep(
-            session.getCommandContext(),
+            new BasicCommandContext(session),
             CascadeDeletePolicy.CASCADE_LAZY,
             false
         );
@@ -184,7 +186,7 @@ public class CascadeDeleteStepTest extends DbTestBase {
         
         // Create cascade delete step with RESTRICT policy
         var cascadeStep = new CascadeDeleteStep(
-            session.getCommandContext(),
+            new BasicCommandContext(session),
             CascadeDeletePolicy.RESTRICT,
             false
         );

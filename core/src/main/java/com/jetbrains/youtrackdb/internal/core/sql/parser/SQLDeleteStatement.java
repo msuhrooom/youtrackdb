@@ -18,6 +18,7 @@ public class SQLDeleteStatement extends SQLStatement {
   protected SQLWhereClause whereClause;
   protected boolean returnBefore = false;
   protected SQLLimit limit = null;
+  protected boolean cascade = false;
   protected boolean unsafe = false;
 
   public SQLDeleteStatement(int id) {
@@ -40,6 +41,9 @@ public class SQLDeleteStatement extends SQLStatement {
     }
     if (limit != null) {
       limit.toString(params, builder);
+    }
+    if (cascade) {
+      builder.append(" CASCADE");
     }
     if (unsafe) {
       builder.append(" UNSAFE");
@@ -184,6 +188,10 @@ public class SQLDeleteStatement extends SQLStatement {
 
   public boolean isUnsafe() {
     return unsafe;
+  }
+
+  public boolean isCascade() {
+    return cascade;
   }
 }
 /* JavaCC - OriginalChecksum=5fb4ca5ba648e6c9110f41d806206a6f (do not edit this line) */

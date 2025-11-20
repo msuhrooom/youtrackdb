@@ -111,6 +111,8 @@ TOKEN:
 	|
 	< DELETE: ( "d" | "D" ) ( "e" | "E" ) ( "l" | "L" ) ( "e" | "E" ) ( "t" | "T" ) ( "e" | "E" ) >
 	|
+	< CASCADE: ("c"|"C")("a"|"A")("s"|"S")("c"|"C")("a"|"A")("d"|"D")("e"|"E") >
+	|
 	< VERTEX: ( "v" | "V" ) ( "e" | "E" ) ( "r" | "R" ) ( "t" | "T" ) ( "e" | "E" ) ( "x" | "X" ) >
 	|
 	< EDGE: ( "e" | "E" ) ( "d" | "D" ) ( "g" | "G" ) ( "e" | "E" ) >
@@ -1956,6 +1958,7 @@ try {
 	[ <RETURN> <BEFORE> { jjtn000.returnBefore = true; } ]
 	[ <WHERE> jjtn000.whereClause = WhereClause() ]
 	[ jjtn000.limit = Limit() ]
+	[ <CASCADE> { jjtn000.cascade = true; }]
 	[ <UNSAFE> { jjtn000.unsafe = true; }]
 )/*@bgen(jjtree)*/
   {

@@ -50,6 +50,11 @@ public abstract class CoreException extends BaseException {
     this.componentName = componentName;
   }
 
+  public CoreException() {
+    super();
+    this.errorCode = null;
+  }
+
   public ErrorCode getErrorCode() {
     return errorCode;
   }

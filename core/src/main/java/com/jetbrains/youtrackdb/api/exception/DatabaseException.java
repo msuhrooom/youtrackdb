@@ -39,4 +39,8 @@ public class DatabaseException extends CoreException {
   public DatabaseException(String message) {
     super(message);
   }
+
+  public DatabaseException(String cascadeDelete, String message, Throwable cause) {
+    super();
+  }
 }

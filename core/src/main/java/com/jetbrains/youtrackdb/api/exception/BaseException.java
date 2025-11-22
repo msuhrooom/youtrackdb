@@ -28,6 +28,10 @@ public abstract class BaseException extends RuntimeException {
   @Nullable
   private String dbName;
 
+  public BaseException() {
+
+  }
+
   public static BaseException wrapException(final BaseException exception, final Throwable cause,
       @Nullable BasicDatabaseSession<?, ?> session) {
     return wrapException(exception, cause, session != null ? session.getDatabaseName() : null);

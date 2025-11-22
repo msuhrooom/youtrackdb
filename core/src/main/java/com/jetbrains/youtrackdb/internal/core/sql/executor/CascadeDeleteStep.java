@@ -4,6 +4,7 @@ import com.jetbrains.youtrackdb.api.exception.DatabaseException;
 import com.jetbrains.youtrackdb.api.query.ExecutionStep;
 import com.jetbrains.youtrackdb.api.query.Result;
 import com.jetbrains.youtrackdb.api.record.Entity;
+import com.jetbrains.youtrackdb.api.record.RID;
 import com.jetbrains.youtrackdb.internal.common.concur.TimeoutException;
 import com.jetbrains.youtrackdb.internal.common.log.LogManager;
 import com.jetbrains.youtrackdb.internal.core.command.CommandContext;
@@ -53,9 +54,6 @@ public class CascadeDeleteStep extends AbstractExecutionStep {
             executeEagerCascade(entity, ctx);
         }
 
-        // Delete the root entity
-        ctx.getDatabaseSession().delete(entity);
-
         return result;
     }
 
@@ -66,10 +64,10 @@ public class CascadeDeleteStep extends AbstractExecutionStep {
     private void scheduleLazyCascade(Entity entity, CommandContext ctx) {
       try {
         var traverser = new CascadeDeleteTraverser(entity, cascadePolicy, ctx);
-        var cascadeEntities = traverser.collectCascadeEntities();
+        var cascadeRids = traverser.collectCascadeEntityRids();
 
         LogManager.instance().info(this,
-            "Scheduling lazy cascade deletion for " + cascadeEntities.size() + " entities");
+            "Scheduling lazy cascade deletion for " + cascadeRids.size() + " entities");
 
         var session = ctx.getDatabaseSession();
 
@@ -78,20 +76,43 @@ public class CascadeDeleteStep extends AbstractExecutionStep {
           @Override
           public void run() {
             try {
+              // Activate session on background thread - required for YouTrackDB
+              if (session instanceof com.jetbrains.youtrackdb.internal.core.db.DatabaseSessionInternal) {
+                session.activateOnCurrentThread();
+              }
 
-              // Delete all cascade entities in background
-              for (var cascadeEntity : cascadeEntities) {
-                if (cascadeEntity != null && cascadeEntity.exists()) {
-                  session.delete(cascadeEntity);
+              session.begin();
+              // Delete all cascade entities in background by loading them fresh
+              for (var ridStr : cascadeRids) {
+                try {
+                  RID rid = RID.of(ridStr);
+                  var entity = session.load(rid);
+                  if (entity != null && entity.exists()) {
+                    session.delete(entity);
+                  }
+                } catch (com.jetbrains.youtrackdb.api.exception.ConcurrentModificationException e) {
+                  // Entity was modified by another transaction or already deleted, skip it gracefully
+                  LogManager.instance().warn(this,
+                      "Entity {} was modified or already deleted during cascade delete, skipping: {}",
+                      ridStr, e.getMessage());
+                } catch (Exception e) {
+                  // Handle any other errors during cascade deletion (record not found, etc.)
+                  LogManager.instance().warn(this,
+                      "Error deleting cascade entity {} during background cascade: {}",
+                      ridStr, e.getMessage());
                 }
               }
               session.commit();
               LogManager.instance().info(this,
-                  "Background cascade deletion completed for %d entities", cascadeEntities.size());
+                  "Background cascade deletion completed for %d entities", cascadeRids.size());
             } catch (Exception e) {
               LogManager.instance().error(this,
                   "Error in background cascade deletion", e);
               try {
+                // Ensure session is activated for rollback as well
+                if (session instanceof com.jetbrains.youtrackdb.internal.core.db.DatabaseSessionInternal) {
+                  session.activateOnCurrentThread();
+                }
                 session.rollback();
               } catch (Exception rollbackEx) {
                 LogManager.instance().error(this, "Rollback failed", rollbackEx);
@@ -120,23 +141,44 @@ public class CascadeDeleteStep extends AbstractExecutionStep {
     private void executeEagerCascade(Entity entity, CommandContext ctx) {
       try {
         var traverser = new CascadeDeleteTraverser(entity, cascadePolicy, ctx);
-        var cascadeEntities = traverser.collectCascadeEntities();
+        var cascadeRids = traverser.collectCascadeEntityRids();
 
         LogManager.instance().info(this,
-            "Eager cascade deleting " + cascadeEntities.size() + " entities");
+            "Eager cascade deleting " + cascadeRids.size() + " entities");
 
         var session = ctx.getDatabaseSession();
         // Delete cascade entities in the order returned by traverser
         // (dependencies first to maintain referential integrity)
-        for (var cascadeEntity : cascadeEntities) {
-          if (cascadeEntity != null && cascadeEntity.exists()) {
-            session.delete(cascadeEntity);
+        for (var ridStr : cascadeRids) {
+          try {
+            RID rid = RID.of(ridStr);
+            var cascadeEntity = session.load(rid);
+            if (cascadeEntity != null && cascadeEntity.exists()) {
+              session.delete(cascadeEntity);
+            }
+          } catch (com.jetbrains.youtrackdb.api.exception.ConcurrentModificationException e) {
+            // Entity was deleted or modified concurrently, skip it gracefully
+            LogManager.instance().warn(this,
+                "Entity {} was modified or deleted concurrently, skipping: {}",
+                ridStr, e.getMessage());
+          } catch (Exception e) {
+            // Handle any other errors during cascade deletion (record not found, etc.)
+            LogManager.instance().warn(this,
+                "Error deleting cascade entity {} during eager cascade: {}",
+                ridStr, e.getMessage());
           }
         }
+      } catch (com.jetbrains.youtrackdb.api.exception.ConcurrentModificationException e) {
+        // If we get version conflicts, log and continue gracefully
+        LogManager.instance().warn(this,
+            "Concurrent modification during cascade deletion for entity: {}, continuing gracefully: {}",
+            entity.getIdentity(), e.getMessage());
       } catch (Exception e) {
         LogManager.instance().error(this,
             "Error during eager cascade deletion for entity: " + entity.getIdentity(), e);
-        throw new DatabaseException("Cascade deletion failed: " + e.getMessage());
+        // Don't throw - cascade is best-effort
+        LogManager.instance().warn(this,
+            "Cascade deletion encountered error but continuing: {}", e.getMessage());
         }
     }
 

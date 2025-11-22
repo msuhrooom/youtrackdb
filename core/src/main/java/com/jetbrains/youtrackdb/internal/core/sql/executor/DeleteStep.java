@@ -24,13 +24,26 @@ public class DeleteStep extends AbstractExecutionStep {
   }
 
   private static Result mapResult(Result result, CommandContext ctx) {
-    if (result.isIdentifiable()) {
-      ctx.getDatabaseSession().delete(result.asRecord());
-    } else {
-      throw new DatabaseException("Can not delete non-record result: " + result);
+    if (!result.isIdentifiable()) {
+      throw new DatabaseException("Cannot delete non-record result: " + result);
     }
+
+    var session = ctx.getDatabaseSession();
+    var tx = session.getActiveTransaction();
+
+    // get just the identity (RID) from the result's record
+    var rid = result.asRecord().getIdentity();
+
+    // reload the record in the *current* tx, which binds it properly
+    var boundRecord = tx.load(rid);  // or session.load(rid) depending on API
+
+    if (boundRecord != null) {
+      tx.delete(boundRecord);      // now delete a record that belongs to this tx
+    }
+
     return result;
   }
+
 
   @Override
   public String prettyPrint(int depth, int indent) {

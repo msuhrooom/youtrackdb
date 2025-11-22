@@ -29,6 +29,7 @@ public class SQLDeleteStatement extends SQLStatement {
     super(p, id);
   }
 
+  @Override
   public void toString(Map<Object, Object> params, StringBuilder builder) {
     builder.append("DELETE FROM ");
     fromClause.toString(params, builder);
@@ -50,6 +51,7 @@ public class SQLDeleteStatement extends SQLStatement {
     }
   }
 
+  @Override
   public void toGenericStatement(StringBuilder builder) {
     builder.append("DELETE FROM ");
     fromClause.toGenericStatement(builder);
@@ -75,6 +77,7 @@ public class SQLDeleteStatement extends SQLStatement {
     result.whereClause = whereClause == null ? null : whereClause.copy();
     result.returnBefore = returnBefore;
     result.limit = limit == null ? null : limit.copy();
+    result.cascade = cascade;
     result.unsafe = unsafe;
     return result;
   }
@@ -192,6 +195,10 @@ public class SQLDeleteStatement extends SQLStatement {
 
   public boolean isCascade() {
     return cascade;
+  }
+
+  public void setCascade(boolean cascade) {
+    this.cascade = cascade;
   }
 }
 /* JavaCC - OriginalChecksum=5fb4ca5ba648e6c9110f41d806206a6f (do not edit this line) */

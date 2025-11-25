@@ -12,35 +12,47 @@ import com.jetbrains.youtrackdb.internal.core.sql.parser.SQLDeleteStatement;
 public class CascadeDeleteExecutionPlanner {
 
   private final SQLDeleteStatement stm;
-    private final CascadeDeletePolicy cascadePolicy;
+  private final CascadeDeletePolicy cascadePolicy;
 
-    public CascadeDeleteExecutionPlanner(SQLDeleteStatement stm, CascadeDeletePolicy cascadePolicy) {
-      this.stm = stm;
-        this.cascadePolicy = cascadePolicy;
-    }
+  public CascadeDeleteExecutionPlanner(SQLDeleteStatement stm,
+                                       CascadeDeletePolicy cascadePolicy) {
+    this.stm = stm;
+    this.cascadePolicy = cascadePolicy;
+  }
 
   public DeleteExecutionPlan createExecutionPlan(CommandContext ctx, boolean enableProfiling) {
-        var executionPlan = new CascadeDeleteExecutionPlan(ctx, cascadePolicy);
+    var executionPlan = new CascadeDeleteExecutionPlan(ctx, cascadePolicy);
 
-    // Build execution plan following YouTrackDB pattern:
-    // 1. First get the entities to delete (use non-cascade delete planner)
-    // Create a copy with cascade=false to avoid infinite recursion
+    // Build a base delete plan (without cascade) and reuse its steps, inserting
+    // cascade handling just before the actual DeleteStep so we preserve safety
+    // checks, limits, and return/count semantics.
     var stmCopy = stm.copy();
     stmCopy.setCascade(false);
-    var basePlan = new DeleteExecutionPlanner(stmCopy).createExecutionPlan(ctx, enableProfiling);
-    var baseStep = basePlan.getSteps().get(0);
-      executionPlan.chain((ExecutionStepInternal) baseStep);
+    var basePlan = new DeleteExecutionPlanner(stmCopy).createExecutionPlan(
+        ctx, enableProfiling);
 
-    // 2. Add cascade delete step if cascade is enabled
-        if (cascadePolicy != CascadeDeletePolicy.NONE) {
-            var cascadeStep = new CascadeDeleteStep(ctx, cascadePolicy, enableProfiling);
-            executionPlan.chain(cascadeStep);
-        }
+    boolean cascadeInserted = false;
+    for (var step : basePlan.getSteps()) {
+      var internalStep = (ExecutionStepInternal)step;
 
-    // 3. Add final delete step
-        var deleteStep = new DeleteStep(ctx, enableProfiling);
-        executionPlan.chain(deleteStep);
+      if (!cascadeInserted && internalStep instanceof DeleteStep &&
+          cascadePolicy.isCascading()) {
+        executionPlan.chain(
+            new CascadeDeleteStep(ctx, cascadePolicy, enableProfiling));
+        cascadeInserted = true;
+      }
+
+      executionPlan.chain((ExecutionStepInternal)internalStep.copy(ctx));
+    }
+
+    // Safety net: if the base plan unexpectedly had no DeleteStep, still append
+    // cascade + delete
+    if (!cascadeInserted && cascadePolicy.isCascading()) {
+      executionPlan.chain(
+          new CascadeDeleteStep(ctx, cascadePolicy, enableProfiling));
+      executionPlan.chain(new DeleteStep(ctx, enableProfiling));
+    }
 
     return executionPlan;
-    }
+  }
 }

@@ -1,5 +1,6 @@
 package com.jetbrains.youtrackdb.internal.core.sql.executor;
 
+import com.jetbrains.youtrackdb.api.DatabaseSession;
 import com.jetbrains.youtrackdb.api.YouTrackDB;
 import com.jetbrains.youtrackdb.api.record.Direction;
 import com.jetbrains.youtrackdb.api.record.Edge;
@@ -7,6 +8,8 @@ import com.jetbrains.youtrackdb.api.record.Entity;
 import com.jetbrains.youtrackdb.api.record.Vertex;
 import com.jetbrains.youtrackdb.internal.common.log.LogManager;
 import com.jetbrains.youtrackdb.internal.core.command.CommandContext;
+import com.jetbrains.youtrackdb.internal.core.db.YouTrackDBImpl;
+import com.jetbrains.youtrackdb.internal.core.db.YouTrackDBInternal;
 import com.jetbrains.youtrackdb.internal.core.record.impl.EntityImpl;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -276,9 +279,37 @@ public class CascadeDeleteTraverser {
     }
 
     if (backgroundManager == null) {
-      throw new CascadeDeleteException(
-          "Background manager not initialized for lazy cascade operations. "
-              + "Call CascadeDeleteTraverser.initializeBackgroundManager() first.");
+      synchronized (CascadeDeleteTraverser.class) {
+        if (backgroundManager == null && ctx != null &&
+            ctx.getDatabaseSession() != null) {
+          var session = ctx.getDatabaseSession();
+          var shared = session.getSharedContext();
+          if (shared != null && shared.getYouTrackDB() != null) {
+            YouTrackDB youTrackDB = null;
+            // Prefer an existing API instance if available
+            if (shared.getYouTrackDB() instanceof YouTrackDB apiInstance) {
+              youTrackDB = apiInstance;
+            } else if (shared.getYouTrackDB() instanceof
+                       YouTrackDBInternal<?> internal) {
+              @SuppressWarnings("unchecked")
+              var casted = (YouTrackDBInternal<DatabaseSession>)internal;
+              youTrackDB = new YouTrackDBImpl(casted);
+            }
+            if (youTrackDB != null) {
+              initializeBackgroundManager(youTrackDB,
+                                          session.getDatabaseName());
+            }
+          }
+        }
+      }
+    }
+
+    if (backgroundManager == null) {
+      logger.warn(this,
+                  "Background manager not available for lazy cascade " +
+                  "operations; skipping cascade for {}",
+                  entity.getIdentity());
+      return;
     }
 
     // Check if background manager is shutting down

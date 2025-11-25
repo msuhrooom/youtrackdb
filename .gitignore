@@ -233,3 +233,4 @@ local.properties
 
 # stack-pr config
 .stack-pr.cfg
+.m2repo/

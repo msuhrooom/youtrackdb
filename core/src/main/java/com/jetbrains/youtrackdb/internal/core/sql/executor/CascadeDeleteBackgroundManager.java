@@ -157,7 +157,7 @@ public class CascadeDeleteBackgroundManager {
       CommandContext backgroundContext = createBackgroundCommandContext(backgroundSession, taskId);
 
       // Load the root entity and collect cascade entities in the same transaction
-      List<Entity> cascadeEntities;
+      List<String> cascadeEntityRids;
       backgroundSession.begin();
       try {
         EntityImpl rootEntity = backgroundSession.getActiveTransaction()
@@ -176,7 +176,7 @@ public class CascadeDeleteBackgroundManager {
 
         logger.info(this, "Task {}: Collecting cascade entities from root: {}", taskId,
             rootEntityRid);
-        cascadeEntities = backgroundTraverser.collectCascadeEntities();
+        cascadeEntityRids = backgroundTraverser.collectCascadeEntityRids();
 
         // Commit after collection is complete
         backgroundSession.getActiveTransaction().commit();
@@ -188,11 +188,8 @@ public class CascadeDeleteBackgroundManager {
       }
 
       // Delete cascade entities in batches to avoid large transactions
-      // Convert Entity list to EntityImpl list
-      List<EntityImpl> cascadeEntityImpls = cascadeEntities.stream()
-          .map(entity -> (EntityImpl) entity)
-          .collect(Collectors.toList());
-      deletedCount = deleteCascadeEntitiesInBatches(taskId, cascadeEntityImpls, backgroundSession);
+      deletedCount = deleteCascadeEntitiesInBatches(taskId, cascadeEntityRids,
+                                                    backgroundSession);
 
       // Delete root entity in separate transaction
       backgroundSession.begin();
@@ -257,38 +254,44 @@ public class CascadeDeleteBackgroundManager {
   /**
    * Deletes cascade entities in batches to avoid large transactions and potential timeouts.
    */
-  private int deleteCascadeEntitiesInBatches(long taskId, List<EntityImpl> cascadeEntities,
-      DatabaseSession session) throws Exception {
+  private int deleteCascadeEntitiesInBatches(long taskId,
+                                             List<String> cascadeEntityRids,
+                                             DatabaseSession session)
+      throws Exception {
     int totalDeleted = 0;
-    int batchCount = (cascadeEntities.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+    int batchCount = (cascadeEntityRids.size() + BATCH_SIZE - 1) / BATCH_SIZE;
 
-    logger.info(this, "Task {}: Deleting {} cascade entities in {} batches of size {}",
-        taskId, cascadeEntities.size(), batchCount, BATCH_SIZE);
+    logger.info(
+        this, "Task {}: Deleting {} cascade entities in {} batches of size {}",
+        taskId, cascadeEntityRids.size(), batchCount, BATCH_SIZE);
 
     for (int batchIndex = 0; batchIndex < batchCount; batchIndex++) {
       int start = batchIndex * BATCH_SIZE;
-      int end = Math.min(start + BATCH_SIZE, cascadeEntities.size());
-      List<EntityImpl> batch = cascadeEntities.subList(start, end);
+      int end = Math.min(start + BATCH_SIZE, cascadeEntityRids.size());
+      List<String> batch = cascadeEntityRids.subList(start, end);
 
       session.begin();
       try {
         int deletedInBatch = 0;
-        for (EntityImpl entity : batch) {
+        for (String ridStr : batch) {
           try {
+            RID rid = RID.of(ridStr);
             // Reload entity in current session before deleting to get latest version
-            EntityImpl reloadedEntity = session.getActiveTransaction()
-                .load(entity.getIdentity());
+            EntityImpl reloadedEntity =
+                session.getActiveTransaction().load(rid);
             if (reloadedEntity != null) {
               session.getActiveTransaction().delete(reloadedEntity);
               deletedInBatch++;
             } else {
-              logger.warn(this, "Task {}: Entity {} no longer exists, skipping", taskId,
-                  entity.getIdentity());
+              logger.warn(this, "Task {}: Entity {} no longer exists, skipping",
+                          taskId, ridStr);
             }
           } catch (com.jetbrains.youtrackdb.api.exception.ConcurrentModificationException e) {
             // Entity was modified by another transaction, skip it gracefully
-            logger.warn(this, "Task {}: Entity {} was modified concurrently, skipping: {}",
-                taskId, entity.getIdentity(), e.getMessage());
+            logger.warn(
+                this,
+                "Task {}: Entity {} was modified concurrently, skipping: {}",
+                taskId, ridStr, e.getMessage());
           }
         }
         session.getActiveTransaction().commit();

@@ -35,6 +35,13 @@ public class CascadeDeleteExecutionPlanner {
     for (var step : basePlan.getSteps()) {
       var internalStep = (ExecutionStepInternal)step;
 
+      // In cascade mode we deliberately skip the safe-delete guard: cascades
+      // are expected to delete graph elements (vertices/edges), so blocking on
+      // the vertex/edge check would prevent the cascade from running.
+      if (internalStep instanceof CheckSafeDeleteStep) {
+        continue;
+      }
+
       if (!cascadeInserted && internalStep instanceof DeleteStep &&
           cascadePolicy.isCascading()) {
         executionPlan.chain(

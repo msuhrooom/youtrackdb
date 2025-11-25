@@ -6,7 +6,9 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import com.jetbrains.youtrackdb.api.exception.CommandExecutionException;
 import com.jetbrains.youtrackdb.internal.DbTestBase;
+import com.jetbrains.youtrackdb.internal.core.sql.executor.CascadeDeleteBackgroundManager;
 import com.jetbrains.youtrackdb.internal.core.command.BasicCommandContext;
 import org.junit.After;
 import org.junit.Before;
@@ -290,6 +292,49 @@ public class CascadeDeleteIntegrationTest extends DbTestBase {
   }
 
   @Test
+  public void testBackgroundManagerCascadeDeletesEager() throws Exception {
+    // Build a tiny graph: Parent -> Child1, Child2
+    var schema = session.getMetadata().getSchema();
+    schema.createVertexClass("Parent");
+    schema.createVertexClass("Child");
+    schema.createEdgeClass("child_of");
+
+    session.begin();
+    var parent = session.newVertex("Parent");
+    parent.setProperty("name", "P1");
+    var child1 = session.newVertex("Child");
+    child1.setProperty("name", "C1");
+    var child2 = session.newVertex("Child");
+    child2.setProperty("name", "C2");
+    parent.addEdge(child1, "child_of");
+    parent.addEdge(child2, "child_of");
+    session.commit();
+
+    // Verify setup
+    session.begin();
+    assertEquals(1, session.countClass("Parent"));
+    assertEquals(2, session.countClass("Child"));
+    session.commit();
+
+    // Run background cascade eagerly on the parent
+    var manager =
+        new CascadeDeleteBackgroundManager(youTrackDB, databaseName);
+    var resultFuture =
+        manager.scheduleCascadeDelete(parent.getIdentity(), CascadeDeletePolicy.CASCADE_EAGER);
+
+    var result = resultFuture.get(10, java.util.concurrent.TimeUnit.SECONDS);
+    assertTrue("Cascade task should succeed", result.success());
+
+    // Verify all entities are gone
+    session.begin();
+    assertEquals("Parent should be deleted", 0, session.countClass("Parent"));
+    assertEquals("Children should be deleted", 0, session.countClass("Child"));
+    session.commit();
+
+    manager.shutdown();
+  }
+
+  @Test
   public void testCascadeDeleteWithCycles() {
     // Test cascade delete behavior with cyclic references
     setupCyclicGraphStructure();
@@ -359,6 +404,99 @@ public class CascadeDeleteIntegrationTest extends DbTestBase {
     assertTrue("Large graph setup should be reasonably fast", elapsed < 10000); // Under 10s
 
     session.commit();
+  }
+
+  @Test
+  public void testSqlCascadeDeletesRootsAndChildrenLazyPath() throws Exception {
+    // Setup simple parent->children graph
+    var schema = session.getMetadata().getSchema();
+    schema.createVertexClass("Parent");
+    schema.createVertexClass("Child");
+    schema.createEdgeClass("child_of");
+
+    session.begin();
+    var p1 = session.newVertex("Parent");
+    p1.setProperty("name", "P1");
+    var c1 = session.newVertex("Child");
+    c1.setProperty("name", "C1");
+    var c2 = session.newVertex("Child");
+    c2.setProperty("name", "C2");
+    p1.addEdge(c1, "child_of");
+    p1.addEdge(c2, "child_of");
+    session.commit();
+
+    // Execute SQL delete with CASCADE (uses lazy policy by default)
+    session.begin();
+    var rs = session.execute("DELETE FROM Parent WHERE name = 'P1' CASCADE");
+    assertTrue("Delete should produce a result", rs.hasNext());
+    session.commit();
+
+    // Root should be gone immediately
+    awaitCount("Parent", 0, 2000);
+    // Children should be removed by background cascade within timeout
+    awaitCount("Child", 0, 5000);
+  }
+
+  @Test(expected = CommandExecutionException.class)
+  public void testDeleteWithoutCascadeBlocksOnVertex() {
+    var schema = session.getMetadata().getSchema();
+    schema.createVertexClass("SoloVertex");
+
+    session.begin();
+    var v = session.newVertex("SoloVertex");
+    v.setProperty("name", "V1");
+    session.commit();
+
+    // DELETE without CASCADE should hit CheckSafeDeleteStep and throw
+    session.begin();
+    try {
+      session.execute("DELETE FROM SoloVertex WHERE name = 'V1'");
+    } finally {
+      session.rollback();
+    }
+  }
+
+  @Test
+  public void testCascadeDeleteRespectsLimitOnRoots() throws Exception {
+    // Two parents each with a child
+    var schema = session.getMetadata().getSchema();
+    schema.createVertexClass("LimitedParent");
+    schema.createVertexClass("LimitedChild");
+    schema.createEdgeClass("lc");
+
+    session.begin();
+    for (int i = 0; i < 2; i++) {
+      var p = session.newVertex("LimitedParent");
+      p.setProperty("name", "P" + i);
+      var c = session.newVertex("LimitedChild");
+      c.setProperty("name", "C" + i);
+      p.addEdge(c, "lc");
+    }
+    session.commit();
+
+    // Delete only one root with LIMIT, cascade should remove its child only
+    session.begin();
+    session.execute("DELETE FROM LimitedParent LIMIT 1 CASCADE");
+    session.commit();
+
+    awaitCount("LimitedParent", 1, 2000); // one root should remain
+    awaitCount("LimitedChild", 1, 5000);  // only one child should remain after cascade
+  }
+
+  private void awaitCount(String className, long expected, long timeoutMs) throws Exception {
+    long deadline = System.currentTimeMillis() + timeoutMs;
+    long current;
+    do {
+      session.begin();
+      current = session.countClass(className);
+      session.commit();
+      if (current == expected) {
+        return;
+      }
+      Thread.sleep(100);
+    } while (System.currentTimeMillis() < deadline);
+    assertEquals("Count for " + className + " did not reach expected value in time",
+        expected, current);
   }
 
   private void setupComplexIssueTrackingGraph() {
